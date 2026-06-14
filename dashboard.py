@@ -120,6 +120,12 @@ if prefill_analysis and os.path.exists(prefill_analysis) and not st.session_stat
         st.session_state.part1 = cached
         st.session_state.part2 = ""
 
+# Also load cached prompt if available
+prompt_file = prefill_analysis.replace("cached_analysis.md", "cached_prompt.md") if prefill_analysis else ""
+if prompt_file and os.path.exists(prompt_file) and not st.session_state.prompt:
+    with open(prompt_file) as f:
+        st.session_state.prompt = f.read()
+
 # ─── Header ───────────────────────────────────────────────────────────────────
 
 st.title("🔍 DeploySense")
@@ -144,8 +150,11 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Auto-load entities if deep-linked and not yet loaded
+    auto_load = prefill_entity and not st.session_state.entities
+
     # Fetch entities for this account
-    if st.button("🔄 Load Entities", use_container_width=True):
+    if st.button("🔄 Load Entities", use_container_width=True) or auto_load:
         with st.spinner("Fetching entities with deployments..."):
             nrql = (
                 f"SELECT count(*) FROM ChangeTrackingEvent "
@@ -163,19 +172,29 @@ with st.sidebar:
                         "deploy_count": r.get("count", 0),
                     })
             st.session_state.entities = entities
-            st.session_state.deployments = []
-            st.session_state.analysis_result = None
+            if not auto_load:
+                st.session_state.deployments = []
+                st.session_state.analysis_result = None
 
-    # Entity selector
+    # Entity selector (auto-select from URL params)
     if st.session_state.entities:
         entity_labels = [f"{e['name']} ({e['deploy_count']} deploys)" for e in st.session_state.entities]
-        selected_entity_idx = st.selectbox("Entity", range(len(st.session_state.entities)), format_func=lambda i: entity_labels[i])
+        default_entity_idx = 0
+        if prefill_entity:
+            for i, e in enumerate(st.session_state.entities):
+                if e["guid"] == prefill_entity:
+                    default_entity_idx = i
+                    break
+        selected_entity_idx = st.selectbox("Entity", range(len(st.session_state.entities)), index=default_entity_idx, format_func=lambda i: entity_labels[i])
         selected_entity = st.session_state.entities[selected_entity_idx]
 
         st.markdown(f"**GUID:** `{selected_entity['guid'][:25]}...`")
 
+        # Auto-load deployments if deep-linked and not yet loaded
+        auto_load_deploys = prefill_entity and not st.session_state.deployments
+
         # Fetch deployments
-        if st.button("📋 Load Deployments", use_container_width=True):
+        if st.button("📋 Load Deployments", use_container_width=True) or auto_load_deploys:
             with st.spinner("Fetching deployments + violations..."):
                 timestamp_ms = int(time.time() * 1000)
                 deployments = run_async(fetch_deployments(selected_entity["guid"], timestamp_ms, account_id))
@@ -185,7 +204,6 @@ with st.sidebar:
                     root_entity, related_map = run_async(fetch_entity_and_related(selected_entity["guid"]))
                     deployments = run_async(enrich_all_parallel(deployments, root_entity, related_map, account_id))
                     st.session_state.deployments = deployments
-                    st.session_state.analysis_result = None
 
         st.markdown("---")
         st.markdown(f"**Deployments loaded:** {len(st.session_state.deployments)}")

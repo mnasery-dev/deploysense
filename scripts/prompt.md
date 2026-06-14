@@ -128,7 +128,18 @@ PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)
 
 Your task is to provide a highly concise, punchy, and scannable pre-deployment risk assessment for a GitHub/GitLab PR comment. Strictly avoid conversational filler, dense walls of text, or redundant justifications. Every line must be optimized for an on-call engineer to skim in under 60 seconds.
 
-### 1. Unified Risk Matrix & Dimension Comparison
+### 1. Red Flags & Final Recommendations
+Provide actionable guidance for the engineering team using strict formatting:
+
+Risk-Prone Lines: Use a bulleted list starting with the specific file/line/version boundary in bold, followed by a single-sentence impact.
+Evidence-Based Flags: List a maximum of 3 punchy bullet points summarizing historical regressions (e.g., metric names, lag limits, specific test names).
+Go/No-Go Recommendation: Provide a definitive verdict followed by exactly 3 high-impact, numbered guardrails (Monitoring, Rollback Trigger, Smoke Test). No paragraphs allowed.
+
+eg. "This PR modifies the payment-gateway wrapper. The structural diff characteristics closely match release-1164 (large payload serialization change), which triggered incident #88241 on a Friday last month, causing a 12% cascading latency spike in the downstream checkout-service."
+eg. "The last deploy that failed for this entity wasn't just a large diff—it specifically touched the same config files, targeted the same environment, and was shipped by the same team."
+
+
+### 2. Unified Risk Matrix & Dimension Comparison
 Synthesize your findings into a Markdown table comparing the Current Deployment against Historical Patterns.
 Constraint: Keep cell descriptions to a maximum of 1-2 bullet points or brief sentences. Use bold keywords at the beginning of phrases to maximize scannability.
 Use the following exact schema: (Keep your existing markdown table structure here) 
@@ -140,15 +151,6 @@ Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
 | **Semantic Risk** | | | | |
 | **Deployment Time**| | | | |
 | **Blast Radius** | | | | |
-
-4. Red Flags & Final Recommendations
-Provide actionable guidance for the engineering team using strict formatting:
-
-Risk-Prone Lines: Use a bulleted list starting with the specific file/line/version boundary in bold, followed by a single-sentence impact.
-
-Evidence-Based Flags: List a maximum of 3 punchy bullet points summarizing historical regressions (e.g., metric names, lag limits, specific test names).
-
-Go/No-Go Recommendation: Provide a definitive verdict followed by exactly 3 high-impact, numbered guardrails (Monitoring, Rollback Trigger, Smoke Test). No paragraphs allowed.
 
 
 ========================================================================

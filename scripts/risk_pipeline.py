@@ -633,6 +633,12 @@ async def run_pipeline(entity_guid: str, timestamp_ms: int, account_id: int, tar
     prompt = build_prompt(target_dep, deployments)
     print(f"[Step 6] Prompt built: {len(prompt)} chars ({len(prompt)//4} ~tokens)", file=sys.stderr)
 
+    # Save prompt to cached file (for dashboard pre-fill)
+    prompt_cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cached_prompt.md")
+    with open(prompt_cache_path, "w") as f:
+        f.write(prompt)
+    print(f"[Step 6] Prompt cached to: {prompt_cache_path}", file=sys.stderr)
+
     # Step 7: Call LLM
     analysis = await call_llm(prompt)
 

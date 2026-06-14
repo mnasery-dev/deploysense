@@ -42,6 +42,7 @@ jobs:
             --nr-api-key "$NR_API_KEY" \
             --ghe-token "$GHE_TOKEN" \
             --llm-token "$NERD_COMPLETION_TOKEN" \
+            --nerdgraph-url "https://staging-api.newrelic.com/graphql" \
             --target-index 0 \
             > /tmp/risk_analysis.md 2> /tmp/pipeline.log
 

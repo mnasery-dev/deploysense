@@ -40,7 +40,7 @@ import httpx
 # CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-NERD_GRAPH_HOST = "https://nerd-graph.staging-service.nr-ops.net"
+NERD_GRAPH_HOST = "https://nerd-graph.staging-service.nr-ops.net"  # Default; override with --nerdgraph-url
 REQUEST_TIMEOUT = 120
 THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 WINDOW_AFTER_DEPLOY_MS = 2 * 60 * 60 * 1000
@@ -69,7 +69,8 @@ def get_request_headers() -> Dict[str, str]:
 
 async def query_nerdgraph(query: str, variables: Optional[Dict] = None) -> dict:
     headers = get_request_headers()
-    url = f"{NERD_GRAPH_HOST}/graphql"
+    # Support both formats: host/graphql or host that already ends with /graphql
+    url = NERD_GRAPH_HOST if NERD_GRAPH_HOST.endswith("/graphql") else f"{NERD_GRAPH_HOST}/graphql"
     body: Dict[str, Any] = {"query": query}
     if variables:
         body["variables"] = variables
@@ -606,7 +607,7 @@ async def run_pipeline(entity_guid: str, timestamp_ms: int, account_id: int, tar
 
 
 def main():
-    global API_KEY, GHE_TOKEN, LLM_TOKEN, LLM_URL
+    global API_KEY, GHE_TOKEN, LLM_TOKEN, LLM_URL, NERD_GRAPH_HOST
 
     parser = argparse.ArgumentParser(description="DeploySense Risk Pipeline")
     parser.add_argument("--entity-guid", required=True)
@@ -616,6 +617,7 @@ def main():
     parser.add_argument("--ghe-token", default=os.environ.get("GHE_TOKEN", ""))
     parser.add_argument("--llm-token", default=os.environ.get("NERD_COMPLETION_TOKEN", ""))
     parser.add_argument("--llm-url", default="https://nerd-completion.staging-service.nr-ops.net")
+    parser.add_argument("--nerdgraph-url", default=os.environ.get("NERDGRAPH_URL", "https://nerd-graph.staging-service.nr-ops.net"))
     parser.add_argument("--target-index", type=int, default=0, help="Index of deployment to evaluate (0=most recent)")
     args = parser.parse_args()
 
@@ -623,6 +625,7 @@ def main():
     GHE_TOKEN = args.ghe_token
     LLM_TOKEN = args.llm_token
     LLM_URL = args.llm_url
+    NERD_GRAPH_HOST = args.nerdgraph_url
 
     if not API_KEY:
         print("Error: --nr-api-key or NR_API_KEY required", file=sys.stderr)

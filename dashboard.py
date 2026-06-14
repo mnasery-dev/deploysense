@@ -100,6 +100,7 @@ query_params = st.query_params
 prefill_account = query_params.get("account_id", None)
 prefill_entity = query_params.get("entity_guid", None)
 prefill_analysis = query_params.get("analysis_file", None)
+prefill_version = query_params.get("version", None)
 
 # If prefill_analysis points to a file, load it
 if prefill_analysis and os.path.exists(prefill_analysis) and not st.session_state.analysis_result:
@@ -208,6 +209,13 @@ with col1:
     st.caption("Select one as the 'test deployment' — previous ones become history for analysis.")
 
     deployments = st.session_state.deployments
+
+    # Auto-select deployment from URL query param (version)
+    if prefill_version and "selected_index" not in st.session_state:
+        for i, dep in enumerate(deployments):
+            if dep.get("version") == prefill_version:
+                st.session_state.selected_index = i
+                break
 
     for i, dep in enumerate(deployments):
         violations = dep.get("root_entity_alert_violations", [])

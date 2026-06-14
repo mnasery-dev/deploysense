@@ -51,7 +51,7 @@ jobs:
             });
             const existing = comments.find(c => c.body.includes('<!-- deploysense-risk-analysis -->'));
 
-            const dashboardUrl = 'http://localhost:8501/?account_id=${{ vars.ACCOUNT_ID }}&entity_guid=${{ vars.ENTITY_GUID }}&analysis_file=scripts/cached_analysis.md';
+            const dashboardUrl = 'http://localhost:8501/?account_id=${{ vars.ACCOUNT_ID }}&entity_guid=${{ vars.ENTITY_GUID }}&version=${{ vars.DEPLOY_VERSION }}&analysis_file=scripts/cached_analysis.md';
             const body = '<!-- deploysense-risk-analysis -->\n## 🔍 DeploySense Risk Analysis\n\n' + part1 + '\n\n---\n*Powered by DeploySense — [📊 View full analysis in dashboard](' + dashboardUrl + ')*';
 
             if (existing) {

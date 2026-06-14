@@ -156,7 +156,7 @@ PART 2: DASHBOARD METRICS & ANALYSIS (DETAILED DATA COMPONENT)
 ========================================================================
 
 ### 1. Current Deployment Analysis
-Analyze the upcoming pre-deployment (`release-408`) thoroughly across the following sub-points:
+Analyze the upcoming pre-deployment across the following sub-points:
 - **Files Changed:** Map whether modifications reside in core business code, configuration schemas, manifest records, or upstream project bill-of-materials (BOM).
 - **Code Diff Size:** Explicitly measure the footprint and density of changes (lines added/removed, total files).
 - **Semantic / Contextual Analysis:** Deeply assess what the code changes actually execute. Evaluate the risk of updating `com.newrelic:idiomancer-bom` from `11.0.1` to `11.0.2` and its downstream module dependencies (`idiomancer-core`, `idiomancer-dagger2`).
@@ -164,7 +164,7 @@ Analyze the upcoming pre-deployment (`release-408`) thoroughly across the follow
 - **Blast Radius:** Highlight exactly which microservices, pipelines, event loops, or uninstrumented databases are functionally exposed if this deployment experiences degradation.
 
 ### 2. Historical Failure Analysis
-Analyze the provided problematic historical releases (`release-407`, `release-405`, `release-403`) collectively across the same 5 dimensions. Identify explicit systemic patterns, correlations, or anomalies (e.g., historical dependencies causing consumer lag, specific teams/deployers involved, specific tests like the 'Batch insert test' repeatedly drifting from baseline).
+Analyze the provided problematic historical releases collectively across the same 5 dimensions. Identify explicit systemic patterns, correlations, or anomalies (e.g., historical dependencies causing consumer lag, specific teams/deployers involved, specific tests like the 'Batch insert test' repeatedly drifting from baseline).
 
 ### 3. Dimension Comparison & Risk Matrix
 Synthesize your findings into a comprehensive Markdown table comparing the **Current Deployment** dimensions against **Historical Patterns**. Assign an explicit risk score for each category choosing strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.

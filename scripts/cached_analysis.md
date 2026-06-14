@@ -6,53 +6,46 @@
 
 | Dimension | Current Change Details | Historical Failure Parallel | Risk Rating | Operational Justification |
 | :--- | :--- | :--- | :--- | :--- |
-| **Files & Size** | 6 files (+151/-11 lines)<br/>🧪 4 test files, 2 core controllers | ❌ No match: Failed deploys had 13-24 files with massive deletions (3.6k lines) or large additions (2.9k lines) | **LOW** | Micro-scale change; test-heavy footprint (67% test files) |
-| **Semantic Risk** | 🔧 Feature flag logic fix<br/>Changes `!= null` → `== true` in FF checks | ✅ Low similarity: Past failures involved config changes, dependency bumps, large features | **MEDIUM** | Logic inversion around FF gating is subtle but affects production validation path; potential for unintended FF bypass |
-| **Deployment Time** | ⏰ Wed 02:58 UTC (off-peak) | ✅ Safe window: Historical failures occurred during business hours (13:12, 15:26, 19:50, 21:32) | **LOW** | Deployment during low-traffic window with team coverage |
-| **Blast Radius** | 48 connected services<br/>Critical: Alerts GraphQL, beyond-api, Kafka topics, RDS cluster | ⚠️ Same surface area as failed deploys | **MEDIUM** | Condition API is foundational; any logic error impacts alert creation/modification across all accounts |
-
-**Overall Risk Score: MEDIUM** ⚠️
-
----
+| **Files & Size** | 6 files, +151/-11 lines<br/>✅ Core logic only (2 controllers)<br/>✅ Test fixtures expanded | ⚠️ release-1164: 13 files, massive deletions (-3607)<br/>✅ No config/infra changes | **LOW** | Surgical fix to feature flag logic; no infra/config mutations; test coverage expanded |
+| **Semantic Risk** | 🔧 Feature flag check refinement<br/>`disableEventCreation != null` → `== true`<br/>Relaxes validation for `false` values | ⚠️ release-1164: Auth endpoint change caused failures<br/>✅ No dependency bumps<br/>✅ No external service changes | **MEDIUM** | Logic inversion risk: changing FF guard semantics could allow unintended API calls for accounts without FF; no breaking downstream changes |
+| **Deployment Time** | ⏰ Wed 02:58 UTC (off-peak)<br/>Mid-week deployment | ✅ Historical failures mostly during business hours (13:12, 15:26, 19:50, 21:32)<br/>✅ Clean deploy at similar time (03:10) | **LOW** | Optimal deployment window; minimal user traffic; on-call coverage active |
+| **Blast Radius** | 48 connected services<br/>🔥 Kafka topics: `alert_condition_crud`<br/>🔥 DB: `alerts-conditions`<br/>🔥 Downstream: GraphQL, Beyond API, NRQL Gateway | ⚠️ High connectivity mirrors historical deployments<br/>❌ No staged rollout visible | **MEDIUM** | Wide fanout to alerting ecosystem; NRQL condition mutations affect customer alert pipelines directly |
 
 ### 2. High-Risk Code Points & Empirical Warnings
 
-#### 🎯 **Line-Level Risks (Current PR)**
-- **`NrqlConditionController.kt:317` & `RpmNrqlController.kt:195,275`**
-  - **Risk:** Changed from `!= null` to `== true` for `disableEventCreation` feature flag check
-  - **Concern:** If client sends `disableEventCreation: false` explicitly (not null), old logic would require FF, new logic allows it
-  - **Impact:** Could allow users to **clear** the `disable_event_creation` field without FF when it was previously blocked
-  - **Mitigation Gap:** Test coverage shows setting to `true` and `false`, but edge case: what if field was previously `true` with FF, then FF removed, and user tries to preserve `true`?
+**🎯 Line-Level Risks (Current PR):**
+- **`NrqlConditionController.kt:317`** & **`RpmNrqlController.kt:195`**: Feature flag guard changed from `!= null` to `== true`
+  - ⚠️ **Semantic inversion**: Previously blocked any value set on `disable_event_creation`; now only blocks `true`
+  - 🔴 **Risk**: Accounts without FF can now set `disable_event_creation: false` freely
+  - 💡 **Impact**: Could enable unexpected API behavior if downstream systems assume FF presence for ANY value
 
-#### 📊 **Purely Historical Flags**
-- ⚠️ **56% alert rate** (9/16 deployments triggered alerts)
-- 🔴 **Most recent similar-scale deploy** (`release-1161`: 1 commit, SUCCESS) still triggered 1 alert
-- ⚠️ **Error rate spikes:** `release-1163` caused baseline deviations on error rate metrics (21:43, 22:36 UTC)
-- 🚨 **Infrastructure failures:** 2/16 deploys had infra-level failures (12.5% failure rate)
-
----
+**🔥 Purely Historical Flags:**
+- **56% failure rate** (9/16 deployments triggered alerts)
+- **Error rate baseline deviations** occurred in release-1163 (~1hr post-deploy)
+- **Infrastructure failures** (release-1162, 1164) correlated with:
+  - External service endpoint changes (Dirac auth migration)
+  - Large deletions (1000+ lines)
+- ✅ **Clean pattern**: Simple controller logic changes at off-peak hours succeeded (release-1171, 1165)
 
 ### 3. Final Go/No-Go Verdict
 
-**✅ Recommendation:** **PROCEED WITH ENHANCED MONITORING** (Canary deployment strongly recommended)
+**✅ Recommendation:** **PROCEED WITH ENHANCED MONITORING**
 
-**🛡️ Mandatory Guardrails:**
+**Mandatory Guardrails:**
+1. **🔍 Active metric watch (T+0 to T+60min):**
+   - Error rate on `/api/v2/{accountId}/nrql_conditions` (POST/PATCH endpoints)
+   - Feature flag evaluation failures (`FeatureFlags.DISABLE_EVENT_CREATION_APIS`)
+   - Validation error spikes (`DisableEventCreationDisabled` responses)
 
-1. **🔍 Active Monitoring (First 30 mins):**
-   - Error rate on `SpringController/api/v2/{accountId}/nrql_conditions` endpoints
-   - `DisableEventCreationDisabled` error frequency (should NOT increase)
-   - Success rate for PATCH operations with `disable_event_creation: false` payload
+2. **🧪 Canary validation (first 15min):**
+   - Verify accounts **without FF** can successfully PATCH `disable_event_creation: false`
+   - Verify accounts **without FF** still get blocked when setting `disable_event_creation: true`
+   - Check Kafka topic `alert_condition_crud` for message schema consistency
 
-2. **🧪 Smoke Test Sequence (Immediate post-deploy):**
-   ```bash
-   # Test 1: Account WITHOUT FF, set disable_event_creation=false → Should 200
-   # Test 2: Account WITHOUT FF, set disable_event_creation=true → Should 403
-   # Test 3: Account WITH FF, set disable_event_creation=true → Should 200
-   ```
-
-3. **⏱️ Rollback Trigger:** If error rate increases >5% baseline OR DisableEventCreationDisabled errors spike unexpectedly, initiate immediate rollback
-
-**⚠️ Red Flag to Watch:** The logic change is **inverse** in nature (blocking on `!= null` vs `== true`). This pattern has high potential for boolean logic errors. Validate FF evaluation behavior in production under load.
+3. **🚨 Rollback trigger criteria:**
+   - Error rate increase >5% on NRQL condition endpoints
+   - Any `500` errors related to `disableEventCreation` field processing
+   - Customer-reported alert condition creation/update failures
 
 ---
 
@@ -61,36 +54,32 @@
 ## 1. Current Deployment Analysis (`release-1174`)
 
 ### Files Changed
-**Core Application Logic:**
-- `src/main/kotlin/com/newrelic/alert/conditions/NrqlConditionController.kt` (+4/-4)
-- `src/main/kotlin/com/newrelic/alert/conditions/rpm/controller/RpmNrqlController.kt` (+4/-4)
+**Category Breakdown:**
+- **Core Application Logic (2 files):**
+  - `src/main/kotlin/com/newrelic/alert/conditions/NrqlConditionController.kt` (+4/-4)
+  - `src/main/kotlin/com/newrelic/alert/conditions/rpm/controller/RpmNrqlController.kt` (+4/-4)
+  
+- **Test Fixtures/HTTP Tests (4 files):**
+  - `src/http_tests/rpm/term_disable_event_creation/no_ff.http` (+1/-1)
+  - `src/http_tests/rpm/term_disable_event_creation/no_ff.log` (+1/-1)
+  - `src/http_tests/v2_nrql_conditions/term_disable_event_creation/no_ff.http` (+30/-0)
+  - `src/http_tests/v2_nrql_conditions/term_disable_event_creation/no_ff.log` (+111/-1)
 
-**Test/Configuration Files:**
-- `src/http_tests/rpm/term_disable_event_creation/no_ff.http` (+1/-1)
-- `src/http_tests/rpm/term_disable_event_creation/no_ff.log` (+1/-1)
-- `src/http_tests/v2_nrql_conditions/term_disable_event_creation/no_ff.http` (+30/-0)
-- `src/http_tests/v2_nrql_conditions/term_disable_event_creation/no_ff.log` (+111/-1)
-
-**Classification:** 67% test files, 33% core controllers. **Zero** infrastructure/manifest changes.
-
----
+**Assessment:** All changes confined to application controllers and test fixtures. No infrastructure manifests, configuration schemas, dependency updates, or database migrations.
 
 ### Code Diff Size
-- **Total Files:** 6
-- **Lines Added:** +151
-- **Lines Removed:** -11
-- **Net Change:** +140 lines
-- **Density:** Micro-scale change. Bulk of additions are test expectations (142 lines in `.log` files)
-- **Actual Logic Changes:** 8 lines across 2 controller files
+- **Total:** 6 files modified
+- **Lines changed:** +151 additions, -11 deletions (net +140)
+- **Density:** Micro-scale change (8 lines of actual logic, 143 lines of test expansion)
+- **Commit count:** 1 focused commit
 
-**Scale Classification:** **MICRO** (actual business logic: 8 lines; rest is test scaffolding)
-
----
+**Classification:** **MICRO-SCALE** — Surgical fix with comprehensive test coverage expansion.
 
 ### Semantic / Contextual Analysis
 
-**Change Summary:**
-The deployment modifies feature flag validation logic for the `disable_event_creation` field in NRQL alert conditions.
+**Change Intent:** Relax feature flag validation to only require the FF when setting `disable_event_creation: true`, not when setting it to `false`.
+
+**Technical Deep-Dive:**
 
 **Before:**
 ```kotlin
@@ -110,144 +99,102 @@ if (condition.terms.orEmpty().any { it.disableEventCreation == true }) {
 }
 ```
 
-**Semantic Impact:**
-- **Old behavior:** Any explicit value for `disableEventCreation` (including `false`) required the feature flag
-- **New behavior:** Only setting `disableEventCreation = true` requires the feature flag
-- **Intent:** Allow users to **clear/disable** the field (`false`) without needing the FF, while still gating the **enable** operation (`true`) behind FF
+**Operational Impact:**
+- **Positive:** Accounts can explicitly clear/set `disable_event_creation: false` without requiring FF entitlement
+- **Risk Surface:** Logic boundary shift from "field presence" to "field value." If downstream systems or database schemas treat `null` vs `false` differently, could introduce subtle bugs
+- **Data Flow:** NRQL conditions written to `alerts-conditions` DB cluster, published to `alert_condition_crud` Kafka topics
 
-**Risk Analysis:**
-1. **Positive:** Aligns with typical FF patterns (gate new functionality, not removal)
-2. **Concern:** Boolean logic inversions are historically error-prone
-3. **Test Coverage:** New tests validate:
-   - Setting to `true` without FF → 403 (blocked) ✅
-   - Setting to `false` without FF → 200 (allowed) ✅
-   - GET after PATCH to `false` → Returns `false` ✅
-
-**Dependencies:** No library version changes. No external service contract modifications.
-
-**Operational Risk Factors:**
-- Affects 2 API endpoints: `/api/v2/{accountId}/nrql_conditions` and RPM legacy endpoint
-- Touches CREATE and PATCH operations
-- Involves feature flag evaluation (runtime configuration dependency)
-
----
+**Test Coverage Expansion:** HTTP tests now validate both scenarios:
+1. Setting `disable_event_creation: true` without FF → blocked (422)
+2. Setting `disable_event_creation: false` without FF → allowed (200)
+3. Persistence verification via GET after PATCH
 
 ### Time of Deployment
-- **Planned Time:** Wednesday 2026-06-10 02:58:33 UTC
-- **Day of Week:** Mid-week (Wednesday) ✅
-- **Time of Day:** ~3 AM UTC
-  - US Eastern: ~10 PM Tuesday (off-peak)
-  - US Pacific: ~7 PM Tuesday (moderate)
-  - Europe: ~4 AM Wednesday (off-peak)
-  
-**Traffic Analysis:** Off-peak for primary US customer base. European early morning (minimal usage).
+- **Scheduled:** Wednesday 2026-06-10 02:58:33 UTC
+- **Day-of-Week Risk:** Mid-week (optimal)
+- **Time-of-Day Risk:** Late night/early morning UTC (off-peak for US/EU customers)
+- **Team Coverage:** Detection Configuration team; Wednesday ensures 2 business days for monitoring before weekend
 
-**Operational Context:**
-- Detection Configuration team deployment
-- Deployer: gfuentes (has clean deploy history in dataset)
-- No blackout period indicated
-- Wednesday provides 2 business days for stabilization before weekend
-
-**Risk Assessment:** **LOW** temporal risk. Optimal deployment window.
-
----
+**Assessment:** **LOW RISK** — Optimal deployment window with full operational coverage.
 
 ### Blast Radius
 
-**Directly Impacted Service:** `Condition API (production)`
+**Direct Downstream Impact:**
+- **Primary Service:** Condition API (production environments: us-fresh-mint, us-that-paul)
+- **Database:** `alerts-conditions` (AWSRDSDBCLUSTER) — stores NRQL condition state
+- **Event Streams:** 
+  - `alert_condition_crud` (us-fresh-mint-kafka, us-that-paul-kafka)
+  - `compound_alerts_crud` (us-fresh-mint-kafka)
 
-**Connected Downstream Services (48 total):**
+**Connected Services (48 total):**
 
-**CRITICAL (High-Severity Impact):**
-1. **Alerts GraphQL Service** (production) - Primary customer-facing alert configuration interface
-2. **beyond-api-v2-web** (3 environments) - Alert policy/condition CRUD operations
-3. **alert_condition_crud** (Kafka topics: us-that-paul, us-fresh-mint) - Event streaming for condition changes
-4. **alerts-conditions** (RDS cluster) - Primary datastore for alert conditions
-5. **Condition Cleanup Service** - Automated condition lifecycle management
+**HIGH PRIORITY (direct functional dependency):**
+1. **Alerts GraphQL Service** — exposes NRQL conditions via GraphQL API
+2. **beyond-api-v2-web** (3 environments) — legacy API gateway
+3. **nrql-query-gateway** (2 environments) — query validation/execution
+4. **Condition Cleanup Service** — background maintenance jobs
+5. **feature-flag-api** — FF evaluation for this exact change
 
-**MODERATE (Transitive Impact):**
-6. **nrql-query-gateway** (2 environments) - Query validation/execution
-7. **feature-flag-api** - FF evaluation dependency
-8. **entitlement-service** - Account permission validation
-9. **cssp-customer-impact-account-service** (3 environments) - Customer impact tracking
+**MEDIUM PRIORITY (operational/monitoring):**
+6. **cssp-customer-impact-account-service** (3 instances) — account entitlement checks
+7. **entitlement-service** — account feature validation
+8. **archived-conditions S3 bucket** — condition state archival
 
-**MONITORING/OBSERVABILITY:**
-10. Multiple NR1 Workloads and test transactions (35+ entities)
-11. Container infrastructure (multiple INFRA/CONTAINER entities)
+**UNINSTRUMENTED (blind spots):**
+- `cssp-customer-impact-account-service.vip.cf.nr-ops.net` (HTTP)
+- `synthetics.newrelic.com` (HTTP)
+- `archived-conditions-production.s3.amazonaws.com` (HTTP)
 
-**UNINSTRUMENTED (Unknown Impact):**
-12. `cssp-customer-impact-account-service.vip.cf.nr-ops.net` (HTTP)
-13. `synthetics.newrelic.com` (HTTP)
-14. `archived-conditions-production.s3.amazonaws.com` (S3)
-
-**Failure Cascade Risk:**
-- **Primary:** Logic error → Invalid alert condition states → Kafka event malformation → Downstream consumer failures
-- **Secondary:** RDS connection exhaustion if validation loops trigger
-- **Tertiary:** Customer-facing alert creation/modification failures across all accounts
-
-**Mitigation Factors:**
-- Change is FF-gated behavior (affects subset of accounts)
-- Read operations unaffected
-- Database schema unchanged
+**Risk Assessment:** **MEDIUM-HIGH** — Changes to condition validation logic propagate through alerting pipeline. NRQL condition creation/updates are customer-facing critical path operations. Any regression impacts alert reliability across the entire customer base.
 
 ---
 
 ## 2. Historical Failure Analysis
 
-### Pattern Analysis Across Failed Deployments
+### Aggregated Failure Patterns (16 deployments analyzed)
 
-#### `release-1164` (FAILURE × 2 instances)
-- **Files:** 13, **Lines:** +2/-3607 (massive deletion)
-- **Change Type:** Infrastructure configuration (Dirac query endpoint migration)
-- **Semantic:** Changed `internal-dirac-unauthed` → `internal-dirac` (authentication requirement change)
-- **Failure Mode:** Both us-fresh-mint and us-that-paul environments failed
-- **Alerts:** "Change Event detected" (Silent SRE agent)
-- **Time:** 15:26 UTC (business hours)
-- **Pattern:** Configuration change affecting external service dependency
+**Failure Distribution:**
+- **Infrastructure failures:** 2 (12.5%)
+- **Alert-triggering deployments:** 9 (56.25%)
+- **Clean deployments:** 5 (31.25%)
 
-#### `release-1163` (SUCCESS but with 3-4 alerts)
-- **Files:** 24, **Lines:** +1860/-139 (large feature addition)
-- **Change Type:** New API field (`entity_count`), dependency bump (BouncyCastle 1.80 → 1.80.2)
-- **Semantic:** Threshold API expansion with facet validation
-- **Failure Mode:** Error rate baseline deviations (21:43, 22:36 UTC)
-- **Alerts:** Error rate anomalies + Change Event detection
-- **Time:** 21:32-21:36 UTC (late evening US time)
-- **Pattern:** Large feature deployment caused transient error spikes
+### Dimension-Specific Historical Patterns
 
-#### `release-1162` (FAILURE + SUCCESS with alerts)
-- **Files:** 19, **Lines:** +2939/-138 (massive feature addition)
-- **Change Type:** Null value threshold scopes feature
-- **Semantic:** Complex validation logic for NRQL facets with null handling
-- **Failure Mode:** Multiple deployment attempts, eventual success with monitoring
-- **Alerts:** Change Event detection
-- **Times:** 03:17 (SUCCESS), 13:12 (FAILURE), 19:50 (FAILURE)
-- **Pattern:** Large, complex feature with multiple rollout attempts
+#### Files Changed Pattern
+| Release | Files | Lines Changed | Type | Outcome | Key Change |
+|---------|-------|---------------|------|---------|------------|
+| 1164 | 13 | +2/-3607 | Config + Deletions | FAILURE | Dirac endpoint auth migration |
+| 1163 | 24 | +1860/-139 | Feature + Dependency | SUCCESS (alerts) | Threshold API expansion + BouncyCastle bump |
+| 1162 | 19 | +2939/-138 | Feature | FAILURE | Null threshold scopes |
 
-#### `release-1161` (SUCCESS with 1 alert)
-- **Files:** Unknown from data
-- **Alerts:** Change Event detection only
-- **Time:** 00:19 UTC (midnight)
-- **Pattern:** Baseline alert triggering (change detection)
+**Pattern:** Large deletions (1000+ lines) or external service endpoint changes correlated with infrastructure failures.
 
----
+#### Diff Size Pattern
+- **Micro (<200 net lines):** release-1174 (current), release-1171 → **LOW RISK** (clean)
+- **Moderate (500-2000):** release-1163 → **MEDIUM RISK** (alerts triggered, deployment succeeded)
+- **Massive (2000+):** release-1162, 1164 → **HIGH RISK** (failures)
 
-### Systemic Patterns Identified
+#### Semantic Risk Pattern
+**High-Risk Changes:**
+1. **External service endpoint migrations:** release-1164 (Dirac unauthed → authed) — immediate failure
+2. **Dependency bumps during feature work:** release-1163 (BouncyCastle 1.80 → 1.80.2) — error rate deviations
+3. **Complex validation logic:** release-1162 (null facet handling) — failure
 
-**Failure Correlations:**
-1. **Size Matters:** 100% of FAILURE deployments had >13 files changed and >1000 lines modified
-2. **Configuration Risk:** Infrastructure/config changes (Dirac endpoint) caused immediate failures
-3. **Large Features:** Complex business logic additions (threshold scopes, entity_count) triggered error rate spikes
-4. **Time Sensitivity:** Business hour deployments (13:12, 15:26, 19:50) had higher failure rates
-5. **Multi-Environment Risk:** Failures often affected both environments simultaneously
+**Low-Risk Changes:**
+- Simple controller logic refinements at similar scale to release-1174
 
-**Alert Patterns:**
-- **Silent SRE "Change Event detected":** Triggered on 100% of deployments (baseline noise)
-- **Error rate baseline deviations:** Specific to large feature additions (release-1163)
-- **56% overall alert rate** (9/16 deployments)
+#### Temporal Pattern
+**Failure-Prone Times:**
+- **Business hours (13:00-22:00 UTC):** 5/7 problematic deployments
+- **Off-peak (00:00-04:00 UTC):** 2/3 clean deployments (including release-1171 at 03:10)
 
-**Success Patterns:**
-- Small, focused changes during off-peak hours had better outcomes
-- Dependency-only updates (BouncyCastle bump in 1163) succeeded but caused monitoring alerts
+#### Alert Patterns
+**"Silent SRE agent - Change Event detected":** Fires on ~80% of deployments (benign monitoring alert)
+
+**"Error rate baseline deviation":** Fires 1-2 hours post-deploy when:
+- Dependency updates included (BouncyCastle)
+- Complex query validation logic changed
+- External service integrations modified
 
 ---
 
@@ -255,8 +202,14 @@ if (condition.terms.orEmpty().any { it.disableEventCreation == true }) {
 
 | Dimension | Current Deployment Details | Historical Pattern Correlation | Risk Rating | Justification & Technical Reasoning |
 | :--- | :--- | :--- | :--- | :--- |
-| **Files Changed** | 6 files (2 core, 4 test)<br/>Zero config/manifest changes | **LOW correlation**<br/>Failed deploys: 13-24 files<br/>Config-heavy (grandcentral.yml, build.gradle) | **LOW** | Current change is 2.3x-4x smaller than historical failures. No infrastructure config touched. Test-heavy footprint reduces production risk. |
-| **Diff Size** | +151/-11 (net +140)<br/>Actual logic: 8 lines<br/>Test scaffolding: 142 lines | **VERY LOW correlation**<br/>Failed deploys: +2939/-138, +2/-3607<br/>Success with alerts: +1860/-139 | **LOW** | Current change is 20x-25x smaller than problematic releases. Micro-scale logic adjustment vs. massive feature additions or deletions in failures. |
-| **Semantic Risk** | Feature flag logic inversion<br/>`!= null` → `== true`<br/>Affects validation gating | **MODERATE correlation**<br/>release-1164: Auth change (failed)<br/>release-1162: Validation logic (multiple attempts)<br/>Boolean logic inversions historically risky | **MEDIUM** | While small in size, the change modifies **conditional logic** around feature flags—a critical control plane. Historical validation logic changes (1162) required multiple deployment attempts. Logic inversions are cognitively error-prone. |
-| **Deployment Time** | Wed 02:58 UTC<br/>Off-peak, mid-week | **NEGATIVE correlation with failures**<br/>Failures: 13:12, 15:26, 19:50, 21:32 UTC<br/>Success: 00:19, 03:17 UTC (off-peak) | **LOW** | Current timing aligns with successful deployment pattern. Off-peak window provides monitoring buffer. Wednesday provides stabilization runway before weekend. |
-| **Blast Radius** | 48 connected services<br/>Kafka topics,
+| **Files Changed** | **6 files:** 2 controllers, 4 test files<br/>**Type:** Pure application logic<br/>**No config/infra changes** | ✅ **Matches clean deploys:** release-1171 (similar footprint)<br/>❌ **Unlike failures:** release-1164 (config), 1162 (massive additions) | **LOW** | Surgical change isolated to business logic layer; no infrastructure/dependency/schema changes that historically triggered failures |
+| **Diff Size** | **+151/-11 (net +140)**<br/>**Micro-scale:** 8 logic lines, 143 test lines | ✅ **Aligns with clean deploys:** <200 net lines historically safe<br/>❌ **Avoids failure pattern:** No massive additions (2000+) or deletions (3000+) | **LOW** | Well below historical failure threshold; test expansion indicates thorough validation; matches release-1171 safety profile |
+| **Semantic Risk** | **Feature flag guard refinement:**<br/>• Logic: `!= null` → `== true`<br/>• Impact: Relaxes validation for `false` values<br/>• Scope: NRQL condition term validation<br/>**No external service changes**<br/>**No dependency updates** | ⚠️ **Partial concern:** Logic boundary shifts can introduce edge cases<br/>✅ **Avoids high-risk patterns:**<br/>• No external endpoint changes (unlike 1164)<br/>• No dependency bumps (unlike 1163)<br/>• Test coverage addresses edge cases | **MEDIUM** | Logic inversion introduces controlled risk: changing guard semantics from "presence" to "value equality" could expose unintended API behavior. However, comprehensive test coverage and no downstream integration changes mitigate risk. Unlike release-1164's external service change (immediate failure) or 1162's complex validation (failure), this is a contained boolean logic refinement. |
+| **Deployment Time** | **Wednesday 02:58 UTC**<br/>• Off-peak traffic<br/>• Mid-week (2 days to weekend)<br/>• Full team coverage window | ✅ **Matches success pattern:** release-1171 (03:10) clean<br/>✅ **Avoids failure window:** 13:00-22:00 UTC (5/7 failures)<br/>✅ **Optimal recovery window:** 3 business days before weekend | **LOW** | Deployment scheduled in empirically safe time window; historical data shows off-peak deployments (00:00-04:00) have 67% clean rate vs. 29% during business hours; Wednesday provides maximum monitoring runway |
+| **Blast Radius** | **48 connected services:**<br/>• Core: Alerts GraphQL, Beyond API, NRQL Gateway<br/>• Data: alerts-conditions DB cluster<br/>• Events: alert_condition_crud Kafka topics<br/>• Uninstrumented: 3 HTTP services | ⚠️ **High connectivity identical to historical deployments**<br/>⚠️ **Customer-facing critical path:** NRQL conditions power customer alerting<br/>✅ **No new integration points added** | **MEDIUM** | Wide fanout to alerting ecosystem inherent to service architecture (not introduced by this change). Critical path nature means any regression impacts customer alert creation/updates. However, change scope (single validation check) limits actual failure modes. Uninstrumented services (cssp, synthetics, S3) create observability gaps but unchanged from baseline. |
+
+---
+
+## 4. Red Flags & Final Recommendations
+
+### 🎯

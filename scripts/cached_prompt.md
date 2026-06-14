@@ -68,9 +68,9 @@ NOTE: This deployment has NOT shipped yet. You are evaluating it BEFORE it goes 
 - condition-api (INFRA/CONTAINER)
 - Test Mario (NR1/WORKLOAD)
 - Transaction - Testing  copy (NR1/WORKLOAD)
-- archived-conditions-production.s3.amazonaws.com (UNINSTRUMENTED/HTTPSERVICE)
 - condition-api (INFRA/CONTAINER)
 - alert_condition_crud (us-fresh-mint-kafka) (INFRA/AWSMSKTOPIC)
+- condition-api (INFRA/CONTAINER)
 - condition-api (INFRA/CONTAINER)
 </current_deployment_metadata>
 

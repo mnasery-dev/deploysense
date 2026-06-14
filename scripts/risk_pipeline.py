@@ -40,7 +40,7 @@ import httpx
 # CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-NERD_GRAPH_HOST = "https://nerd-graph.staging-service.nr-ops.net"
+NERD_GRAPH_HOST = "https://nerd-graph.staging-service.nr-ops.net"  # Default; override with --nerdgraph-url
 REQUEST_TIMEOUT = 120
 THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 WINDOW_AFTER_DEPLOY_MS = 2 * 60 * 60 * 1000
@@ -69,7 +69,8 @@ def get_request_headers() -> Dict[str, str]:
 
 async def query_nerdgraph(query: str, variables: Optional[Dict] = None) -> dict:
     headers = get_request_headers()
-    url = f"{NERD_GRAPH_HOST}/graphql"
+    # Support both formats: host/graphql or host that already ends with /graphql
+    url = NERD_GRAPH_HOST if NERD_GRAPH_HOST.endswith("/graphql") else f"{NERD_GRAPH_HOST}/graphql"
     body: Dict[str, Any] = {"query": query}
     if variables:
         body["variables"] = variables
@@ -508,16 +509,53 @@ Files: {len(files)}, Lines: +{p.get('lines_added', 0)} -{p.get('lines_removed', 
 
     # Instructions
     versions = ", ".join(d.get("version", "?") for d in problem[:5])
-    prompt += f"""Please process the provided information and generate a comprehensive assessment structured strictly around the following sections:
+    current_version = dep.get('version', '?')
+    prompt += f"""Please process the provided information and generate an assessment structured into two distinct, isolated parts:
+
+========================================================================
+PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)
+========================================================================
+
+Generate a highly compressed markdown block intended for a Pull Request comment. Avoid walls of text; use emojis and bullet points so an engineer can audit the risk in under 10 seconds.
+
+### 1. Unified Risk Matrix & Dimension Comparison
+Synthesize your analysis of the current release against historical failure patterns into a clean Markdown table. Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+
+| Dimension | Current Change Details | Historical Failure Parallel | Risk Rating | Operational Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **Files & Size** | | | | |
+| **Semantic Risk** | | | | |
+| **Deployment Time**| | | | |
+| **Blast Radius** | | | | |
+
+### 2. High-Risk Code Points & Empirical Warnings
+- **Line-Level Risks:** Explicitly target specific files, modules, or library version boundaries in the current PR that introduced the primary risk profile.
+- **Purely Historical Flags:** Surface critical warnings derived *exclusively* from empirical history (e.g., specific alert regressions or service track records).
+
+### 3. Final Go/No-Go Verdict
+- **Recommendation:** Provide a definitive, structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing).
+- **Mandatory Guardrails:** List 2-3 concrete verification steps or specific metrics to actively watch during the deployment stabilization window.
+
+
+========================================================================
+PART 2: DASHBOARD METRICS & ANALYSIS (DETAILED DATA COMPONENT)
+========================================================================
 
 ### 1. Current Deployment Analysis
-Analyze `{dep.get('version', '?')}` across: Files Changed, Code Diff Size, Semantic/Contextual Analysis, Time of Deployment, Blast Radius.
+Analyze the upcoming pre-deployment (`{current_version}`) thoroughly across the following sub-points:
+- **Files Changed:** Map whether modifications reside in core business code, configuration schemas, manifest records, or upstream project bill-of-materials (BOM).
+- **Code Diff Size:** Explicitly measure the footprint and density of changes (lines added/removed, total files).
+- **Semantic / Contextual Analysis:** Deeply assess what the code changes actually execute.
+- **Time of Deployment:** Evaluate the day-of-week and time-of-day risks relative to normal team operation hours.
+- **Blast Radius:** Highlight exactly which microservices, pipelines, event loops, or uninstrumented databases are functionally exposed if this deployment experiences degradation.
 
 ### 2. Historical Failure Analysis
-Analyze ({versions}) collectively. Identify systemic patterns, correlations, recurring alerts.
+Analyze the provided problematic historical releases ({versions}) collectively across the same 5 dimensions. Identify explicit systemic patterns, correlations, or anomalies.
 
 ### 3. Dimension Comparison & Risk Matrix
-| Dimension | Current Deployment Details | Historical Pattern Correlation | Risk Rating | Justification |
+Synthesize your findings into a comprehensive Markdown table comparing the **Current Deployment** dimensions against **Historical Patterns**. Assign an explicit risk score for each category choosing strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+
+| Dimension | Current Deployment Details | Historical Pattern Correlation | Risk Rating | Justification & Technical Reasoning |
 | :--- | :--- | :--- | :--- | :--- |
 | **Files Changed** | | | | |
 | **Diff Size** | | | | |
@@ -526,9 +564,10 @@ Analyze ({versions}) collectively. Identify systemic patterns, correlations, rec
 | **Blast Radius** | | | | |
 
 ### 4. Red Flags & Final Recommendations
-- **Risk-Prone Lines & Code Points**
-- **Evidence-Based Flags (Pure History)**
-- **Go/No-Go Recommendation** (Proceed / Postpone / Canary-with-Targeted-Tracing / Rollback-Strategy-Verification)
+Provide actionable, high-impact guidance for the engineering and on-call rotation teams:
+- **Risk-Prone Lines & Code Points:** Explicitly identify specific files or library version boundaries in the current PR that introduced the primary risk profile.
+- **Evidence-Based Flags (Pure History):** Surface critical red flags derived *exclusively* from empirical historical evidence.
+- **Go/No-Go Recommendation:** Provide a definitive structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing, Rollback-Strategy-Verification) detailing specific verification steps necessary before moving code to production.
 """
     return prompt
 
@@ -594,6 +633,12 @@ async def run_pipeline(entity_guid: str, timestamp_ms: int, account_id: int, tar
     prompt = build_prompt(target_dep, deployments)
     print(f"[Step 6] Prompt built: {len(prompt)} chars ({len(prompt)//4} ~tokens)", file=sys.stderr)
 
+    # Save prompt to cached file (for dashboard pre-fill)
+    prompt_cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cached_prompt.md")
+    with open(prompt_cache_path, "w") as f:
+        f.write(prompt)
+    print(f"[Step 6] Prompt cached to: {prompt_cache_path}", file=sys.stderr)
+
     # Step 7: Call LLM
     analysis = await call_llm(prompt)
 
@@ -606,7 +651,7 @@ async def run_pipeline(entity_guid: str, timestamp_ms: int, account_id: int, tar
 
 
 def main():
-    global API_KEY, GHE_TOKEN, LLM_TOKEN, LLM_URL
+    global API_KEY, GHE_TOKEN, LLM_TOKEN, LLM_URL, NERD_GRAPH_HOST
 
     parser = argparse.ArgumentParser(description="DeploySense Risk Pipeline")
     parser.add_argument("--entity-guid", required=True)
@@ -616,6 +661,7 @@ def main():
     parser.add_argument("--ghe-token", default=os.environ.get("GHE_TOKEN", ""))
     parser.add_argument("--llm-token", default=os.environ.get("NERD_COMPLETION_TOKEN", ""))
     parser.add_argument("--llm-url", default="https://nerd-completion.staging-service.nr-ops.net")
+    parser.add_argument("--nerdgraph-url", default=os.environ.get("NERDGRAPH_URL", "https://nerd-graph.staging-service.nr-ops.net"))
     parser.add_argument("--target-index", type=int, default=0, help="Index of deployment to evaluate (0=most recent)")
     args = parser.parse_args()
 
@@ -623,6 +669,7 @@ def main():
     GHE_TOKEN = args.ghe_token
     LLM_TOKEN = args.llm_token
     LLM_URL = args.llm_url
+    NERD_GRAPH_HOST = args.nerdgraph_url
 
     if not API_KEY:
         print("Error: --nr-api-key or NR_API_KEY required", file=sys.stderr)

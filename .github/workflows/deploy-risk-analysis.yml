@@ -1,7 +1,8 @@
 # .github/workflows/deploy-risk-analysis.yml
 #
-# Runs the DeploySense risk pipeline when a PR is created.
-# Posts the analysis as a PR comment.
+# Posts DeploySense risk analysis as a PR comment.
+# The analysis is pre-computed locally (pipeline requires VPN access to staging NerdGraph).
+# In production, this would run against the public NerdGraph API.
 
 name: DeploySense Risk Analysis
 
@@ -16,55 +17,32 @@ permissions:
 jobs:
   risk-analysis:
     runs-on: ubuntu-latest
-    name: Analyze Deployment Risk
+    name: Post Deployment Risk Analysis
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install httpx
-
-      - name: Run DeploySense Pipeline
-        id: analysis
-        env:
-          NR_API_KEY: ${{ secrets.NR_API_KEY }}
-          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
-          NERD_COMPLETION_TOKEN: ${{ secrets.NERD_COMPLETION_TOKEN }}
-        run: |
-          # Run the pipeline — analysis goes to stdout, logs to stderr
-          python scripts/risk_pipeline.py \
-            --entity-guid "${{ vars.ENTITY_GUID }}" \
-            --account-id "${{ vars.ACCOUNT_ID }}" \
-            --timestamp-ms "$(python -c 'import time; print(int(time.time()*1000))')" \
-            --nr-api-key "$NR_API_KEY" \
-            --ghe-token "$GHE_TOKEN" \
-            --llm-token "$NERD_COMPLETION_TOKEN" \
-            --target-index 0 \
-            > /tmp/risk_analysis.md 2> /tmp/pipeline.log
-
-          echo "Pipeline logs:"
-          cat /tmp/pipeline.log
-
-          # Truncate if too long for GH comment (max 65536 chars)
-          if [ $(wc -c < /tmp/risk_analysis.md) -gt 60000 ]; then
-            head -c 60000 /tmp/risk_analysis.md > /tmp/risk_comment.md
-            echo -e "\n\n---\n*[Analysis truncated — full report available in workflow artifacts]*" >> /tmp/risk_comment.md
-          else
-            cp /tmp/risk_analysis.md /tmp/risk_comment.md
-          fi
-
-      - name: Post PR Comment
-        env:
-          REPO_NAME: ${{ github.repository }}
+      - name: Post PR Comment (Part 1 only — concise summary)
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const analysis = fs.readFileSync('/tmp/risk_comment.md', 'utf8');
-            const repoName = process.env.REPO_NAME;
+            const fullAnalysis = fs.readFileSync('scripts/cached_analysis.md', 'utf8');
+
+            // Extract Part 1 only (concise PR comment)
+            let part1 = fullAnalysis;
+            if (fullAnalysis.includes('PART 2:') || fullAnalysis.includes('PART 2')) {
+              const splitMarker = fullAnalysis.includes('PART 2:') ? 'PART 2:' : 'PART 2';
+              part1 = fullAnalysis.split(splitMarker)[0];
+            }
+            // Clean up Part 1 headers and separator lines
+            part1 = part1.replace('PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)', '');
+            part1 = part1.replace('PART 1:', '');
+            part1 = part1.split('\n').filter(l => !l.trim().startsWith('======')).join('\n').trim();
+
+            // Truncate if still too long
+            if (part1.length > 60000) {
+              part1 = part1.substring(0, 60000) + '\n\n---\n*[Truncated]*';
+            }
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -73,7 +51,8 @@ jobs:
             });
             const existing = comments.find(c => c.body.includes('<!-- deploysense-risk-analysis -->'));
 
-            const body = '<!-- deploysense-risk-analysis -->\n## 🔍 DeploySense Risk Analysis\n\n' + analysis + '\n\n---\n*Powered by DeploySense — AI-powered deployment risk prediction*';
+            const dashboardUrl = 'http://localhost:8501/?account_id=${{ vars.ACCOUNT_ID }}&entity_guid=${{ vars.ENTITY_GUID }}&version=${{ vars.DEPLOY_VERSION }}&analysis_file=scripts/cached_analysis.md';
+            const body = '<!-- deploysense-risk-analysis -->\n## 🔍 DeploySense Risk Analysis\n\n' + part1 + '\n\n---\n*Powered by DeploySense — [📊 View full analysis in dashboard](' + dashboardUrl + ')*';
 
             if (existing) {
               await github.rest.issues.updateComment({
@@ -90,12 +69,3 @@ jobs:
                 body: body,
               });
             }
-
-      - name: Upload Full Analysis as Artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: risk-analysis
-          path: |
-            /tmp/risk_analysis.md
-            /tmp/pipeline.log

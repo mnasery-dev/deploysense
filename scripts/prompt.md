@@ -119,7 +119,37 @@ Please append code diffs, files changed, and metadata for previous failing relea
 </historical_code_changes_and_diffs>
 
 
-Please process the provided information and generate a comprehensive assessment structured strictly around the following sections:
+Please process the provided information and generate an assessment structured into two distinct, isolated parts:
+
+========================================================================
+PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)
+========================================================================
+
+Generate a highly compressed markdown block intended for a Pull Request comment. Avoid walls of text; use emojis and bullet points so an engineer can audit the risk in under 10 seconds.
+
+### 1. Unified Risk Matrix & Dimension Comparison
+Synthesize your analysis of the current release against historical failure patterns into a clean Markdown table. Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+
+| Dimension | Current Change Details | Historical Failure Parallel | Risk Rating | Operational Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **Files & Size** | | | | |
+| **Semantic Risk** | | | | |
+| **Deployment Time**| | | | |
+| **Blast Radius** | | | | |
+
+### 2. High-Risk Code Points & Empirical Warnings
+- **Line-Level Risks:** Explicitly target specific files, modules, or library version boundaries in the current PR that introduced the primary risk profile.
+- **Purely Historical Flags:** Surface critical warnings derived *exclusively* from empirical history (e.g., specific alert regressions or service track records).
+
+
+### 3. Final Go/No-Go Verdict
+- **Recommendation:** Provide a definitive, structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing).
+- **Mandatory Guardrails:** List 2-3 concrete verification steps or specific metrics to actively watch during the deployment stabilization window.
+
+
+========================================================================
+PART 2: DASHBOARD METRICS & ANALYSIS (DETAILED DATA COMPONENT)
+========================================================================
 
 ### 1. Current Deployment Analysis
 Analyze the upcoming pre-deployment (`release-408`) thoroughly across the following sub-points:
@@ -148,3 +178,5 @@ Provide actionable, high-impact guidance for the engineering and on-call rotatio
 - **Risk-Prone Lines & Code Points:** Explicitly identify specific files or library version boundaries in the current PR that introduced the primary risk profile.
 - **Evidence-Based Flags (Pure History):** Surface critical red flags derived *exclusively* from empirical historical evidence (e.g., current service failure rate trends, identical component alert histories, recurring regression types).
 - **Go/No-Go Recommendation:** Provide a definitive structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing, Rollback-Strategy-Verification) detailing specific verification steps necessary before moving code to production.
+
+

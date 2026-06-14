@@ -509,16 +509,53 @@ Files: {len(files)}, Lines: +{p.get('lines_added', 0)} -{p.get('lines_removed', 
 
     # Instructions
     versions = ", ".join(d.get("version", "?") for d in problem[:5])
-    prompt += f"""Please process the provided information and generate a comprehensive assessment structured strictly around the following sections:
+    current_version = dep.get('version', '?')
+    prompt += f"""Please process the provided information and generate an assessment structured into two distinct, isolated parts:
+
+========================================================================
+PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)
+========================================================================
+
+Generate a highly compressed markdown block intended for a Pull Request comment. Avoid walls of text; use emojis and bullet points so an engineer can audit the risk in under 10 seconds.
+
+### 1. Unified Risk Matrix & Dimension Comparison
+Synthesize your analysis of the current release against historical failure patterns into a clean Markdown table. Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+
+| Dimension | Current Change Details | Historical Failure Parallel | Risk Rating | Operational Justification |
+| :--- | :--- | :--- | :--- | :--- |
+| **Files & Size** | | | | |
+| **Semantic Risk** | | | | |
+| **Deployment Time**| | | | |
+| **Blast Radius** | | | | |
+
+### 2. High-Risk Code Points & Empirical Warnings
+- **Line-Level Risks:** Explicitly target specific files, modules, or library version boundaries in the current PR that introduced the primary risk profile.
+- **Purely Historical Flags:** Surface critical warnings derived *exclusively* from empirical history (e.g., specific alert regressions or service track records).
+
+### 3. Final Go/No-Go Verdict
+- **Recommendation:** Provide a definitive, structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing).
+- **Mandatory Guardrails:** List 2-3 concrete verification steps or specific metrics to actively watch during the deployment stabilization window.
+
+
+========================================================================
+PART 2: DASHBOARD METRICS & ANALYSIS (DETAILED DATA COMPONENT)
+========================================================================
 
 ### 1. Current Deployment Analysis
-Analyze `{dep.get('version', '?')}` across: Files Changed, Code Diff Size, Semantic/Contextual Analysis, Time of Deployment, Blast Radius.
+Analyze the upcoming pre-deployment (`{current_version}`) thoroughly across the following sub-points:
+- **Files Changed:** Map whether modifications reside in core business code, configuration schemas, manifest records, or upstream project bill-of-materials (BOM).
+- **Code Diff Size:** Explicitly measure the footprint and density of changes (lines added/removed, total files).
+- **Semantic / Contextual Analysis:** Deeply assess what the code changes actually execute.
+- **Time of Deployment:** Evaluate the day-of-week and time-of-day risks relative to normal team operation hours.
+- **Blast Radius:** Highlight exactly which microservices, pipelines, event loops, or uninstrumented databases are functionally exposed if this deployment experiences degradation.
 
 ### 2. Historical Failure Analysis
-Analyze ({versions}) collectively. Identify systemic patterns, correlations, recurring alerts.
+Analyze the provided problematic historical releases ({versions}) collectively across the same 5 dimensions. Identify explicit systemic patterns, correlations, or anomalies.
 
 ### 3. Dimension Comparison & Risk Matrix
-| Dimension | Current Deployment Details | Historical Pattern Correlation | Risk Rating | Justification |
+Synthesize your findings into a comprehensive Markdown table comparing the **Current Deployment** dimensions against **Historical Patterns**. Assign an explicit risk score for each category choosing strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+
+| Dimension | Current Deployment Details | Historical Pattern Correlation | Risk Rating | Justification & Technical Reasoning |
 | :--- | :--- | :--- | :--- | :--- |
 | **Files Changed** | | | | |
 | **Diff Size** | | | | |
@@ -527,9 +564,10 @@ Analyze ({versions}) collectively. Identify systemic patterns, correlations, rec
 | **Blast Radius** | | | | |
 
 ### 4. Red Flags & Final Recommendations
-- **Risk-Prone Lines & Code Points**
-- **Evidence-Based Flags (Pure History)**
-- **Go/No-Go Recommendation** (Proceed / Postpone / Canary-with-Targeted-Tracing / Rollback-Strategy-Verification)
+Provide actionable, high-impact guidance for the engineering and on-call rotation teams:
+- **Risk-Prone Lines & Code Points:** Explicitly identify specific files or library version boundaries in the current PR that introduced the primary risk profile.
+- **Evidence-Based Flags (Pure History):** Surface critical red flags derived *exclusively* from empirical historical evidence.
+- **Go/No-Go Recommendation:** Provide a definitive structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing, Rollback-Strategy-Verification) detailing specific verification steps necessary before moving code to production.
 """
     return prompt
 

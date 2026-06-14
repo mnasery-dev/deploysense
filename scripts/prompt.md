@@ -120,15 +120,19 @@ Please append code diffs, files changed, and metadata for previous failing relea
 
 
 Please process the provided information and generate an assessment structured into two distinct, isolated parts:
+Generate the assessment in simple language. 
 
 ========================================================================
 PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)
 ========================================================================
 
-Generate a highly compressed markdown block intended for a Pull Request comment. Avoid walls of text; use emojis and bullet points so an engineer can audit the risk in under 10 seconds.
+Your task is to provide a highly concise, punchy, and scannable pre-deployment risk assessment for a GitHub/GitLab PR comment. Strictly avoid conversational filler, dense walls of text, or redundant justifications. Every line must be optimized for an on-call engineer to skim in under 60 seconds.
 
 ### 1. Unified Risk Matrix & Dimension Comparison
-Synthesize your analysis of the current release against historical failure patterns into a clean Markdown table. Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
+Synthesize your findings into a Markdown table comparing the Current Deployment against Historical Patterns.
+Constraint: Keep cell descriptions to a maximum of 1-2 bullet points or brief sentences. Use bold keywords at the beginning of phrases to maximize scannability.
+Use the following exact schema: (Keep your existing markdown table structure here) 
+Assign a risk rating chosen strictly from: **LOW | MEDIUM | HIGH | CRITICAL**.
 
 | Dimension | Current Change Details | Historical Failure Parallel | Risk Rating | Operational Justification |
 | :--- | :--- | :--- | :--- | :--- |
@@ -137,14 +141,14 @@ Synthesize your analysis of the current release against historical failure patte
 | **Deployment Time**| | | | |
 | **Blast Radius** | | | | |
 
-### 2. High-Risk Code Points & Empirical Warnings
-- **Line-Level Risks:** Explicitly target specific files, modules, or library version boundaries in the current PR that introduced the primary risk profile.
-- **Purely Historical Flags:** Surface critical warnings derived *exclusively* from empirical history (e.g., specific alert regressions or service track records).
+4. Red Flags & Final Recommendations
+Provide actionable guidance for the engineering team using strict formatting:
 
+Risk-Prone Lines: Use a bulleted list starting with the specific file/line/version boundary in bold, followed by a single-sentence impact.
 
-### 3. Final Go/No-Go Verdict
-- **Recommendation:** Provide a definitive, structural recommendation (e.g., Proceed, Postpone, Canary-with-Targeted-Tracing).
-- **Mandatory Guardrails:** List 2-3 concrete verification steps or specific metrics to actively watch during the deployment stabilization window.
+Evidence-Based Flags: List a maximum of 3 punchy bullet points summarizing historical regressions (e.g., metric names, lag limits, specific test names).
+
+Go/No-Go Recommendation: Provide a definitive verdict followed by exactly 3 high-impact, numbered guardrails (Monitoring, Rollback Trigger, Smoke Test). No paragraphs allowed.
 
 
 ========================================================================

@@ -94,6 +94,31 @@ if "part2" not in st.session_state:
     st.session_state.part2 = None
 
 
+# ─── URL Query Parameters (for deep-linking from PR comment) ──────────────────
+
+query_params = st.query_params
+prefill_account = query_params.get("account_id", None)
+prefill_entity = query_params.get("entity_guid", None)
+prefill_analysis = query_params.get("analysis_file", None)
+
+# If prefill_analysis points to a file, load it
+if prefill_analysis and os.path.exists(prefill_analysis) and not st.session_state.analysis_result:
+    with open(prefill_analysis) as f:
+        cached = f.read()
+    st.session_state.analysis_result = cached
+    if "PART 2:" in cached or "PART 2" in cached:
+        parts = cached.split("PART 2:", 1) if "PART 2:" in cached else cached.split("PART 2", 1)
+        part1 = parts[0].replace("PART 1: GITHUB/GITLAB PR COMMENT (CONCISE & SCANNABLE)", "").strip()
+        part1 = "\n".join(l for l in part1.split("\n") if not l.strip().startswith("===="))
+        st.session_state.part1 = part1.strip()
+        part2 = parts[1] if len(parts) > 1 else ""
+        part2 = part2.replace("DASHBOARD METRICS & ANALYSIS (DETAILED DATA COMPONENT)", "").strip()
+        part2 = "\n".join(l for l in part2.split("\n") if not l.strip().startswith("===="))
+        st.session_state.part2 = part2.strip()
+    else:
+        st.session_state.part1 = cached
+        st.session_state.part2 = ""
+
 # ─── Header ───────────────────────────────────────────────────────────────────
 
 st.title("🔍 DeploySense")
@@ -104,9 +129,15 @@ st.caption("AI-powered deployment risk analysis — select an entity and deploym
 with st.sidebar:
     st.header("Configuration")
 
-    # Account selector
+    # Account selector (auto-select from URL params if provided)
     account_names = [f"{a['name']} ({a['id']})" for a in ACCOUNTS]
-    selected_account_idx = st.selectbox("Account", range(len(ACCOUNTS)), format_func=lambda i: account_names[i])
+    default_account_idx = 0
+    if prefill_account:
+        for i, a in enumerate(ACCOUNTS):
+            if str(a["id"]) == str(prefill_account):
+                default_account_idx = i
+                break
+    selected_account_idx = st.selectbox("Account", range(len(ACCOUNTS)), index=default_account_idx, format_func=lambda i: account_names[i])
     selected_account = ACCOUNTS[selected_account_idx]
     account_id = selected_account["id"]
 
@@ -282,8 +313,6 @@ with col2:
 
         # Display Part 1 (concise PR comment)
         if st.session_state.get("part1"):
-            st.markdown("*This is what would appear as a PR comment:*")
-            st.markdown("---")
             st.markdown(st.session_state.part1, unsafe_allow_html=True)
         elif st.session_state.analysis_result:
             st.markdown(st.session_state.analysis_result)
